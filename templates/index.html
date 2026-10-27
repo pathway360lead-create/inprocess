@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>In-Process Inspection · Dimensions</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body data-role="{{ role }}" data-csrf="{{ csrf_token() }}"><main>
+<div class="top">
+  <div><h1>In-Process Quality Inspection · Dimensions</h1>
+  <p class="sub">HTN-QAC-FM-02 · {{ email }} · {{ 'QA officer' if role == 'qao' else 'Inspector' }}</p></div>
+  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Sign out</button></form>
+</div>
+
+<section class="card">
+<h2>New measurement</h2>
+<div class="grid">
+<div><label>Ref No. (as in Excel)</label><input id="ref" placeholder="26-01" autocomplete="off"></div>
+<div><label>Net ID</label><input id="mno" placeholder="e.g. 1" autocomplete="off"></div>
+<div><label>Lead Inspector</label><input id="insp" autocomplete="off"></div>
+</div>
+<div class="grid" style="margin-top:10px">
+<div><label>Length – re1</label><input id="l1" type="number" inputmode="decimal" step="any"></div>
+<div><label>Length – re2</label><input id="l2" type="number" inputmode="decimal" step="any"></div>
+<div><label>Width – re1</label><input id="w1" type="number" inputmode="decimal" step="any"></div>
+<div><label>Width – re2</label><input id="w2" type="number" inputmode="decimal" step="any"></div>
+<div><label>Height – re1</label><input id="h1" type="number" inputmode="decimal" step="any"></div>
+<div><label>Height – re2</label><input id="h2" type="number" inputmode="decimal" step="any"></div>
+<div><label>Height – re3</label><input id="h3" type="number" inputmode="decimal" step="any"></div>
+<div><label>Cir / 4</label><input id="c4" type="number" inputmode="decimal" step="any"></div>
+</div>
+<div class="calc" id="calc"></div>
+<div class="row"><button class="p" id="save">Submit</button><button id="clear">Clear</button></div>
+<div class="msg" id="msg"></div>
+</section>
+
+<section class="card">
+<h2>Submitted entries <span class="tag" id="count">0</span></h2>
+{% if role == 'qao' %}
+<form id="exp" method="post" action="{{ url_for('export') }}" style="margin:0 0 10px">
+<input type="hidden" name="csrf" value="{{ csrf_token() }}">
+<input type="hidden" name="withref" id="withref" value="0">
+<input type="hidden" name="format" id="export_format" value="xlsx">
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;padding:12px;background:var(--bg);border:1px solid var(--bd);border-radius:8px">
+  <div>
+    <label for="filter_start_date" style="font-size:12px;color:var(--mut);margin-bottom:3px">From date</label>
+    <input type="date" id="filter_start_date" name="start_date" style="padding:6px 10px;font-size:13px;width:auto">
+  </div>
+  <div>
+    <label for="filter_end_date" style="font-size:12px;color:var(--mut);margin-bottom:3px">To date</label>
+    <input type="date" id="filter_end_date" name="end_date" style="padding:6px 10px;font-size:13px;width:auto">
+  </div>
+  <div>
+    <label for="filter_insp" style="font-size:12px;color:var(--mut);margin-bottom:3px">Filter by Inspector</label>
+    <select id="filter_insp" name="filter_insp" style="padding:7px 10px;font-size:13px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);min-width:140px">
+      <option value="">All Inspectors</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:6px">
+    <button type="button" id="btn_today" style="padding:6px 12px;font-size:12px">Today</button>
+    <button type="button" id="btn_clear_filters" style="padding:6px 12px;font-size:12px">Clear Filters</button>
+  </div>
+</div>
+
+<div class="row" style="margin-top:0">
+<button class="p" type="submit" id="dl">Download Excel (.xlsx)</button>
+<button type="button" id="cp">Copy for Excel</button>
+<button type="submit" id="dlc">Download with Ref No (.xlsx)</button>
+<button type="submit" id="dl_csv">Download CSV</button>
+<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" name="only_new" value="1" id="onlyNew" style="width:auto" checked> only not yet downloaded</label>
+<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" name="headers" value="1" id="incHeaders" style="width:auto" checked> include headers</label>
+</div>
+</form>
+{% endif %}
+<div class="msg" id="omsg"></div>
+<div class="wrap"><table>
+<thead><tr><th>Ref No.</th><th>Net ID</th><th>Inspector</th><th>L1</th><th>L2</th><th>W1</th><th>W2</th><th>H1</th><th>H2</th><th>H3</th><th>Cir/4</th><th>Date</th><th>Status</th><th></th></tr></thead>
+<tbody id="rows"></tbody></table></div>
+</section>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body></html>
