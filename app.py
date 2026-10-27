@@ -137,6 +137,81 @@ def num(v):
 def list_entries():
     return jsonify(rows())
 
+# ---------- user management (QAO only) ----------
+@app.get("/api/users")
+@login_required("qao")
+def api_list_users():
+    u_list = [{"id": u["id"], "email": u["email"], "role": u["role"]}
+              for u in db().execute("SELECT id, email, role FROM users ORDER BY role, email")]
+    return jsonify(u_list)
+
+@app.post("/api/users")
+@login_required("qao")
+def api_create_user():
+    d = request.get_json(silent=True) or {}
+    email = str(d.get("email", "")).strip().lower()
+    password = str(d.get("password", "")).strip()
+    role = str(d.get("role", "inspector")).strip().lower()
+
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify(error="Enter a valid email address."), 400
+    if len(password) < 4:
+        return jsonify(error="Password must be at least 4 characters."), 400
+    if role not in ("qao", "inspector"):
+        role = "inspector"
+
+    existing = db().execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+    if existing:
+        return jsonify(error=f"User with email '{email}' already exists."), 409
+
+    db().execute("INSERT INTO users(email, pw, role) VALUES(?, ?, ?)",
+                 (email, generate_password_hash(password), role))
+    db().commit()
+    return jsonify(ok=True)
+
+@app.put("/api/users/<int:user_id>")
+@login_required("qao")
+def api_update_user(user_id):
+    d = request.get_json(silent=True) or {}
+    u = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not u:
+        return jsonify(error="User not found."), 404
+
+    new_pw = d.get("password")
+    new_email = d.get("email")
+
+    if new_pw is not None:
+        new_pw = str(new_pw).strip()
+        if len(new_pw) < 4:
+            return jsonify(error="Password must be at least 4 characters."), 400
+        db().execute("UPDATE users SET pw=? WHERE id=?", (generate_password_hash(new_pw), user_id))
+
+    if new_email is not None:
+        new_email = str(new_email).strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
+            return jsonify(error="Enter a valid email address."), 400
+        existing = db().execute("SELECT id FROM users WHERE email=? AND id!=?", (new_email, user_id)).fetchone()
+        if existing:
+            return jsonify(error=f"Email '{new_email}' is already in use."), 409
+        db().execute("UPDATE users SET email=? WHERE id=?", (new_email, user_id))
+        if user_id == session.get("uid"):
+            session["email"] = new_email
+
+    db().commit()
+    return jsonify(ok=True)
+
+@app.delete("/api/users/<int:user_id>")
+@login_required("qao")
+def api_delete_user(user_id):
+    if user_id == session.get("uid"):
+        return jsonify(error="You cannot delete your own account."), 400
+    u = db().execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    if not u:
+        return jsonify(error="User not found."), 404
+    db().execute("DELETE FROM users WHERE id=?", (user_id,))
+    db().commit()
+    return jsonify(ok=True)
+
 @app.post("/api/entries")
 @login_required()
 def save_entry():

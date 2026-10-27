@@ -150,4 +150,124 @@ if (QAO) {
     try { await navigator.clipboard.writeText(text); say($("omsg"), "Copied " + n + " rows. Paste into column X of the first matching row.", "ok"); load(); }
     catch (e) { say($("omsg"), "Copy was blocked. Use the download button instead.", "bad"); }
   };
+
+  // User management
+  if ($("userSection")) {
+    let usersList = [];
+    const userSay = (t, c) => say($("userMsg"), t, c);
+
+    $("toggleUsers").onclick = () => {
+      const p = $("usersPanel");
+      const open = p.style.display !== "none";
+      p.style.display = open ? "none" : "block";
+      $("toggleUsers").textContent = open ? "Manage Accounts" : "Close Panel";
+      if (!open) loadUsers();
+    };
+
+    async function loadUsers() {
+      try {
+        const r = await api("/api/users");
+        if (r.ok) {
+          usersList = r.j;
+          renderUsers();
+        }
+      } catch (e) {}
+    }
+
+    function renderUsers() {
+      const inspectorsOnly = usersList.filter(u => u.role === "inspector");
+      $("userCount").textContent = inspectorsOnly.length;
+      const tbody = $("userRows");
+      tbody.innerHTML = "";
+
+      for (const u of usersList) {
+        const tr = document.createElement("tr");
+
+        const tdEmail = document.createElement("td");
+        tdEmail.textContent = u.email;
+        tr.appendChild(tdEmail);
+
+        const tdRole = document.createElement("td");
+        const tag = document.createElement("span");
+        tag.className = "tag" + (u.role === "qao" ? " n" : "");
+        tag.textContent = u.role === "qao" ? "QA Officer" : "Inspector";
+        tdRole.appendChild(tag);
+        tr.appendChild(tdRole);
+
+        const tdAct = document.createElement("td");
+        tdAct.style.display = "flex";
+        tdAct.style.gap = "6px";
+
+        if (u.role === "inspector") {
+          const bReset = document.createElement("button");
+          bReset.textContent = "Reset Password";
+          bReset.style.padding = "3px 8px";
+          bReset.style.fontSize = "12px";
+          bReset.onclick = async () => {
+            const np = prompt("Enter new password for " + u.email + " (min 4 characters):");
+            if (!np) return;
+            if (np.trim().length < 4) return alert("Password must be at least 4 characters.");
+            const r = await api("/api/users/" + u.id, {
+              method: "PUT",
+              body: JSON.stringify({ password: np.trim() })
+            });
+            if (r.ok) {
+              userSay("Password updated for " + u.email + ".", "ok");
+            } else {
+              userSay(r.j.error || "Failed to update password.", "bad");
+            }
+          };
+          tdAct.appendChild(bReset);
+
+          const bDel = document.createElement("button");
+          bDel.textContent = "Delete";
+          bDel.style.padding = "3px 8px";
+          bDel.style.fontSize = "12px";
+          bDel.onclick = async () => {
+            if (!confirm("Are you sure you want to remove inspector " + u.email + "?")) return;
+            const r = await api("/api/users/" + u.id, { method: "DELETE" });
+            if (r.ok) {
+              userSay("Removed inspector " + u.email + ".", "ok");
+              loadUsers();
+            } else {
+              userSay(r.j.error || "Could not delete user.", "bad");
+            }
+          };
+          tdAct.appendChild(bDel);
+        } else {
+          const span = document.createElement("span");
+          span.style.color = "var(--mut)";
+          span.style.fontSize = "12px";
+          span.textContent = "Active admin";
+          tdAct.appendChild(span);
+        }
+
+        tr.appendChild(tdAct);
+        tbody.appendChild(tr);
+      }
+    }
+
+    $("btn_create_user").onclick = async () => {
+      const email = $("new_user_email").value.trim();
+      const pw = $("new_user_pw").value;
+      if (!email || !pw) return userSay("Enter both email and password.", "bad");
+      if (pw.length < 4) return userSay("Password must be at least 4 characters.", "bad");
+
+      const r = await api("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ email, password: pw, role: "inspector" })
+      });
+      if (r.ok) {
+        userSay("Inspector " + email + " created successfully!", "ok");
+        $("new_user_email").value = "";
+        $("new_user_pw").value = "";
+        loadUsers();
+      } else {
+        userSay(r.j.error || "Could not create user.", "bad");
+      }
+    };
+
+    loadUsers();
+  }
 }
+
