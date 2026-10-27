@@ -137,6 +137,18 @@ def num(v):
 def list_entries():
     return jsonify(rows())
 
+@app.get("/api/inspectors")
+@login_required()
+def api_list_inspectors():
+    """Return the list of inspector email addresses for the Lead Inspector dropdown."""
+    inspectors = [
+        row["email"]
+        for row in db().execute(
+            "SELECT email FROM users WHERE role='inspector' ORDER BY email"
+        )
+    ]
+    return jsonify(inspectors)
+
 # ---------- user management (QAO only) ----------
 @app.get("/api/users")
 @login_required("qao")

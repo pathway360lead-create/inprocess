@@ -13,7 +13,24 @@ async function api(url, opts = {}) {
   return { ok: r.ok, status: r.status, j };
 }
 
-try { $("insp").value = localStorage.getItem("htn_insp") || ""; } catch (e) {}
+// Inspector dropdown is populated from the server; localStorage is used to restore last selection
+async function loadInspectors() {
+  try {
+    const r = await api("/api/inspectors");
+    if (!r.ok) return;
+    const sel = $("insp");
+    const prev = localStorage.getItem("htn_insp") || "";
+    sel.innerHTML = '<option value="">\u2014 select inspector \u2014</option>';
+    for (const name of r.j) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name === prev) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch (e) {}
+}
+loadInspectors();
 
 function updateCalc() {
   const v = F.map(f => num($(f).value));
@@ -22,7 +39,7 @@ function updateCalc() {
   $("calc").textContent = "Preview: length avg " + avg(v.slice(0,2)) + " · width avg " + avg(v.slice(2,4)) + " · height avg " + avg(v.slice(4,7)) + " · circumference " + cir + " (Excel does the official calculation)";
 }
 F.forEach(f => $(f).addEventListener("input", updateCalc)); updateCalc();
-const clearForm = () => { ["ref","mno",...F].forEach(i => $(i).value = ""); updateCalc(); $("ref").focus(); };
+const clearForm = () => { ["ref","mno",...F].forEach(i => $(i).value = ""); $("insp").value = localStorage.getItem("htn_insp") || ""; updateCalc(); $("ref").focus(); };
 $("clear").onclick = () => { clearForm(); say($("msg")); };
 
 $("save").onclick = async () => {
@@ -38,7 +55,12 @@ $("save").onclick = async () => {
   }
   if (!r.ok) return say($("msg"), r.j.error || "Could not save.", "bad");
   try { localStorage.setItem("htn_insp", d.insp); } catch (e) {}
-  say($("msg"), "Submitted " + d.ref + ".", "ok"); clearForm(); load();
+  say($("msg"), "Submitted " + d.ref + ".", "ok"); load();
+  // keep inspector selected, just clear other fields
+  const savedInsp = d.insp;
+  ["ref","mno",...F].forEach(i => $(i).value = "");
+  $("insp").value = savedInsp;
+  updateCalc();
 };
 
 function formatDate(ts) {
