@@ -214,18 +214,19 @@ $("submitAll").onclick = async () => {
     say($("msg"),
       `Saved ${r.j.saved} of ${r.j.total}. Issues: ${r.j.errors.slice(0, 2).join("; ")}`,
       "bad");
+    await load();   // refresh table even on partial success
   } else {
     // Full success — remember inspector, reset form
     const lastInsp = batch[batch.length - 1].insp;
     try { localStorage.setItem("htn_insp", lastInsp); } catch(e) {}
-    say($("msg"),
-      `✓ ${r.j.saved} measurement${r.j.saved !== 1 ? "s" : ""} submitted successfully!`,
-      "ok");
     $("entryRows").innerHTML = "";
     rowSeq = 0;
     addRow();
+    await load();   // refresh table BEFORE showing success message
+    say($("msg"),
+      `✓ ${r.j.saved} measurement${r.j.saved !== 1 ? "s" : ""} submitted successfully!`,
+      "ok");
   }
-  load();
 };
 
 // =====================================================================
@@ -302,7 +303,17 @@ function render() {
 }
 
 async function load() {
-  try { const r = await api("/api/entries"); if (r.ok) { entries = r.j; render(); } } catch(e) {}
+  try {
+    const r = await api("/api/entries");
+    if (r.ok) {
+      entries = r.j;
+      render();
+    } else {
+      console.warn("load() failed:", r.status, r.j);
+    }
+  } catch(e) {
+    console.error("load() error:", e);
+  }
 }
 load(); setInterval(load, 15000);
 
