@@ -11,25 +11,16 @@
 </div>
 
 <section class="card">
-<h2>New measurement</h2>
-<div class="grid">
-<div><label>Ref No. (as in Excel)</label><input id="ref" placeholder="26-01" autocomplete="off"></div>
-<div><label>Net ID</label><input id="mno" placeholder="e.g. 1" autocomplete="off"></div>
-<div><label>Lead Inspector</label><select id="insp" style="width:100%"><option value="">— select inspector —</option></select></div>
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+  <h2 style="margin:0">New measurements &nbsp;<span class="tag" id="rowCount">0</span></h2>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button type="button" class="p" id="addRow">＋ Add Net</button>
+    <button type="button" id="submitAll">Submit All</button>
+    <button type="button" id="clearAll">Clear All</button>
+  </div>
 </div>
-<div class="grid" style="margin-top:10px">
-<div><label>Length – re1</label><input id="l1" type="number" inputmode="decimal" step="any"></div>
-<div><label>Length – re2</label><input id="l2" type="number" inputmode="decimal" step="any"></div>
-<div><label>Width – re1</label><input id="w1" type="number" inputmode="decimal" step="any"></div>
-<div><label>Width – re2</label><input id="w2" type="number" inputmode="decimal" step="any"></div>
-<div><label>Height – re1</label><input id="h1" type="number" inputmode="decimal" step="any"></div>
-<div><label>Height – re2</label><input id="h2" type="number" inputmode="decimal" step="any"></div>
-<div><label>Height – re3</label><input id="h3" type="number" inputmode="decimal" step="any"></div>
-<div><label>Cir / 4</label><input id="c4" type="number" inputmode="decimal" step="any"></div>
-</div>
-<div class="calc" id="calc"></div>
-<div class="row"><button class="p" id="save">Submit</button><button id="clear">Clear</button></div>
 <div class="msg" id="msg"></div>
+<div id="entryRows"></div>
 </section>
 
 <section class="card">

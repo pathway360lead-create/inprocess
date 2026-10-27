@@ -280,6 +280,63 @@ def delete_entry(ref):
     db().execute("DELETE FROM dimensions WHERE ref=?", (ref,)); db().commit()
     return jsonify(ok=True)
 
+@app.post("/api/entries/bulk")
+@login_required()
+def save_entries_bulk():
+    """Accept a list of entry dicts and save them all; returns {saved, total, errors}."""
+    data = request.get_json(silent=True) or []
+    if not isinstance(data, list) or not data:
+        return jsonify(error="No entries provided."), 400
+
+    now = int(time.time()); me = session["uid"]; qao = session["role"] == "qao"
+    results = []
+
+    for i, d in enumerate(data):
+        label = f"Row {i+1}"
+        ref = str(d.get("ref", "")).strip()
+        insp = str(d.get("insp", "")).strip()[:60]
+
+        if not re.fullmatch(r"[\w.\-]{1,30}", ref):
+            results.append({"ref": ref, "ok": False,
+                            "error": f"{label}: Invalid Ref No. (letters, digits, - only)."}); continue
+        if not insp:
+            results.append({"ref": ref, "ok": False,
+                            "error": f"{label} ({ref}): Select a Lead Inspector."}); continue
+
+        mno_raw = str(d.get("mno", "")).strip()[:60]
+        if not mno_raw:
+            results.append({"ref": ref, "ok": False,
+                            "error": f"{label} ({ref}): Enter the Net ID."}); continue
+        mno_num = num(mno_raw); mno = mno_num if mno_num is not None else mno_raw
+
+        vals = [num(d.get(f)) for f in FIELDS]
+        if any(v is None for v in vals):
+            results.append({"ref": ref, "ok": False,
+                            "error": f"{label} ({ref}): Fill in all 8 measurements."}); continue
+
+        ex = db().execute("SELECT * FROM dimensions WHERE ref=?", (ref,)).fetchone()
+        if ex:
+            if not qao and ex["uid"] != me:
+                results.append({"ref": ref, "ok": False,
+                                "error": f"{label} ({ref}): Already submitted by {ex['insp']}."}); continue
+            if not qao and ex["exported"]:
+                results.append({"ref": ref, "ok": False,
+                                "error": f"{label} ({ref}): Already downloaded by QAO."}); continue
+            db().execute("UPDATE dimensions SET mno=?,insp=?,l1=?,l2=?,w1=?,w2=?,h1=?,h2=?,h3=?,c4=?,"
+                         "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE ref=?",
+                         [mno, insp, *vals, session["email"], now, ref])
+        else:
+            db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
+                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         [ref, mno, insp, *vals, me, session["email"], now, now])
+        results.append({"ref": ref, "ok": True})
+
+    saved = sum(1 for r in results if r["ok"])
+    if saved:
+        db().commit(); purge()
+    errors = [r["error"] for r in results if not r["ok"]]
+    return jsonify(ok=saved > 0, saved=saved, total=len(data), errors=errors)
+
 def parse_val(v):
     if v is None:
         return ""

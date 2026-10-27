@@ -4,7 +4,7 @@ const CSRF = document.body.dataset.csrf, QAO = document.body.dataset.role === "q
 let entries = [];
 
 const say = (el, t, c) => { el.textContent = t || ""; el.className = "msg " + (c || ""); };
-const num = v => (v === "" || isNaN(Number(v))) ? null : Number(v);
+const num = v => (v === "" || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
 
 async function api(url, opts = {}) {
   const r = await fetch(url, { ...opts, headers: { "Content-Type": "application/json", "X-CSRF": CSRF } });
@@ -13,56 +13,224 @@ async function api(url, opts = {}) {
   return { ok: r.ok, status: r.status, j };
 }
 
-// Inspector dropdown is populated from the server; localStorage is used to restore last selection
-async function loadInspectors() {
+// =====================================================================
+//  Inspector dropdown (shared cache, per-row selects)
+// =====================================================================
+let inspectorsList = [];   // [{email, name}]
+
+async function loadInspectorsCache() {
   try {
     const r = await api("/api/inspectors");
-    if (!r.ok) return;
-    const sel = $("insp");
-    const prev = localStorage.getItem("htn_insp") || "";
-    sel.innerHTML = '<option value="">\u2014 select inspector \u2014</option>';
-    for (const insp of r.j) {
-      const opt = document.createElement("option");
-      opt.value = insp.name;   // store display name in the insp field
-      opt.textContent = insp.name;
-      if (insp.name === prev) opt.selected = true;
-      sel.appendChild(opt);
-    }
-  } catch (e) {}
+    if (r.ok) inspectorsList = r.j;
+  } catch(e) {}
 }
-loadInspectors();
 
-function updateCalc() {
-  const v = F.map(f => num($(f).value));
-  const avg = a => a.every(x => x !== null) ? (a.reduce((p, c) => p + c, 0) / a.length).toFixed(1) : "–";
-  const cir = v[7] !== null ? (v[7] * 4).toFixed(1) : "–";
-  $("calc").textContent = "Preview: length avg " + avg(v.slice(0,2)) + " · width avg " + avg(v.slice(2,4)) + " · height avg " + avg(v.slice(4,7)) + " · circumference " + cir + " (Excel does the official calculation)";
-}
-F.forEach(f => $(f).addEventListener("input", updateCalc)); updateCalc();
-const clearForm = () => { ["ref","mno",...F].forEach(i => $(i).value = ""); $("insp").value = localStorage.getItem("htn_insp") || ""; updateCalc(); $("ref").focus(); };
-$("clear").onclick = () => { clearForm(); say($("msg")); };
-
-$("save").onclick = async () => {
-  const d = { ref: $("ref").value.trim(), insp: $("insp").value.trim(), mno: $("mno").value.trim() };
-  for (const f of F) d[f] = num($(f).value);
-  if (!d.mno) return say($("msg"), "Enter the Net ID.", "bad");
-  if (F.some(f => d[f] === null)) return say($("msg"), "Fill in every reading (numbers only).", "bad");
-  const body = o => ({ method: "POST", body: JSON.stringify(o) });
-  let r = await api("/api/entries", body(d));
-  if (r.status === 409 && r.j.exists) {
-    if (!confirm("Ref No. " + d.ref + " already exists. Replace it?")) return;
-    r = await api("/api/entries", body({ ...d, replace: true }));
+function populateInspectorSelect(sel, currentValue) {
+  const cur = currentValue !== undefined ? currentValue : sel.value;
+  sel.innerHTML = '<option value="">— select inspector —</option>';
+  for (const insp of inspectorsList) {
+    const opt = document.createElement("option");
+    opt.value = insp.name;
+    opt.textContent = insp.name;
+    if (insp.name === cur) opt.selected = true;
+    sel.appendChild(opt);
   }
-  if (!r.ok) return say($("msg"), r.j.error || "Could not save.", "bad");
-  try { localStorage.setItem("htn_insp", d.insp); } catch (e) {}
-  say($("msg"), "Submitted " + d.ref + ".", "ok"); load();
-  // keep inspector selected, just clear other fields
-  const savedInsp = d.insp;
-  ["ref","mno",...F].forEach(i => $(i).value = "");
-  $("insp").value = savedInsp;
-  updateCalc();
+}
+
+// =====================================================================
+//  Multi-row entry form
+// =====================================================================
+let rowSeq = 0;
+
+function calcPreview(rowEl) {
+  const g = cls => {
+    const el = rowEl.querySelector(cls);
+    if (!el) return null;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? null : v;
+  };
+  const vs = [".f-l1",".f-l2",".f-w1",".f-w2",".f-h1",".f-h2",".f-h3",".f-c4"].map(g);
+  const avg = arr => arr.every(x => x !== null) ? (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1) : "–";
+  const cir  = vs[7] !== null ? (vs[7] * 4).toFixed(1) : "–";
+  const el = rowEl.querySelector(".row-calc");
+  if (el) el.textContent =
+    `Preview → L avg ${avg(vs.slice(0,2))} · W avg ${avg(vs.slice(2,4))} · H avg ${avg(vs.slice(4,7))} · Cir ${cir}`;
+}
+
+function updateRowNumbers() {
+  document.querySelectorAll(".entry-row").forEach((el, i) => {
+    const span = el.querySelector(".row-num");
+    if (span) span.textContent = `Net #${i + 1}`;
+  });
+  const rc = $("rowCount");
+  if (rc) rc.textContent = document.querySelectorAll(".entry-row").length;
+}
+
+function createRow(prevInsp) {
+  rowSeq++;
+  const div = document.createElement("div");
+  div.className = "entry-row";
+  div.style.cssText = [
+    "border:1px solid var(--bd)",
+    "border-radius:10px",
+    "padding:14px 16px",
+    "margin-bottom:12px",
+    "background:var(--bg)",
+    "transition:box-shadow .2s"
+  ].join(";");
+  div.dataset.rid = rowSeq;
+
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="row-num" style="font-weight:700;font-size:13px;color:var(--acc);letter-spacing:.3px">Net #1</span>
+      <button type="button" class="remove-row" title="Remove this net"
+        style="background:none;border:1px solid var(--bd);border-radius:6px;color:var(--mut);
+               font-size:12px;cursor:pointer;padding:3px 10px;line-height:1.5">✕ Remove</button>
+    </div>
+    <div class="grid">
+      <div><label>Ref No. (as in Excel)</label>
+           <input class="f-ref" placeholder="26-01" autocomplete="off"></div>
+      <div><label>Net ID</label>
+           <input class="f-mno" placeholder="e.g. 1" autocomplete="off"></div>
+      <div><label>Lead Inspector</label>
+           <select class="f-insp"
+             style="width:100%;padding:8px 10px;font-size:14px;border:1px solid var(--bd);
+                    border-radius:8px;background:var(--card);color:var(--tx)">
+             <option value="">— select inspector —</option>
+           </select></div>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>Length – re1</label><input class="f-l1" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Length – re2</label><input class="f-l2" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Width – re1</label> <input class="f-w1" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Width – re2</label> <input class="f-w2" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Height – re1</label><input class="f-h1" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Height – re2</label><input class="f-h2" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Height – re3</label><input class="f-h3" type="number" inputmode="decimal" step="any"></div>
+      <div><label>Cir / 4</label>     <input class="f-c4" type="number" inputmode="decimal" step="any"></div>
+    </div>
+    <div class="calc row-calc" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+  `;
+
+  // Populate inspector dropdown
+  populateInspectorSelect(div.querySelector(".f-insp"),
+    prevInsp !== undefined ? prevInsp : (localStorage.getItem("htn_insp") || ""));
+
+  // Live preview on every measurement input
+  ["f-l1","f-l2","f-w1","f-w2","f-h1","f-h2","f-h3","f-c4"].forEach(cls => {
+    div.querySelector("." + cls).addEventListener("input", () => calcPreview(div));
+  });
+  calcPreview(div);
+
+  // Remove button
+  div.querySelector(".remove-row").onclick = () => {
+    if (document.querySelectorAll(".entry-row").length === 1) {
+      say($("msg"), "You need at least one row.", "bad");
+      return;
+    }
+    div.style.opacity = "0.4";
+    setTimeout(() => { div.remove(); updateRowNumbers(); }, 150);
+  };
+
+  return div;
+}
+
+function addRow() {
+  const allRows = document.querySelectorAll(".entry-row");
+  let prevInsp = localStorage.getItem("htn_insp") || "";
+  if (allRows.length > 0) {
+    const lastInsp = allRows[allRows.length - 1].querySelector(".f-insp").value;
+    if (lastInsp) prevInsp = lastInsp;
+  }
+  const row = createRow(prevInsp);
+  $("entryRows").appendChild(row);
+  updateRowNumbers();
+  // Scroll to new row and focus Ref No.
+  row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  setTimeout(() => row.querySelector(".f-ref").focus(), 150);
+}
+
+// Initialise with one row after inspectors are loaded
+(async () => {
+  await loadInspectorsCache();
+  addRow();
+})();
+
+$("addRow").onclick = addRow;
+
+$("clearAll").onclick = () => {
+  if (document.querySelectorAll(".entry-row").length > 1) {
+    if (!confirm("Clear all rows and start fresh?")) return;
+  }
+  $("entryRows").innerHTML = "";
+  rowSeq = 0;
+  say($("msg"));
+  addRow();
 };
 
+$("submitAll").onclick = async () => {
+  const rowEls = [...document.querySelectorAll(".entry-row")];
+  const batch = [];
+  const clientErrors = [];
+
+  rowEls.forEach((el, i) => {
+    const ref  = el.querySelector(".f-ref").value.trim();
+    const mno  = el.querySelector(".f-mno").value.trim();
+    const insp = el.querySelector(".f-insp").value;
+    const flds = {};
+    ["l1","l2","w1","w2","h1","h2","h3","c4"].forEach(f => {
+      flds[f] = num(el.querySelector(".f-" + f).value);
+    });
+
+    const n = i + 1;
+    if (!ref)                                  { clientErrors.push(`Net #${n}: Enter the Ref No.`); return; }
+    if (!/^[\w.\-]{1,30}$/.test(ref))          { clientErrors.push(`Net #${n}: Ref "${ref}" has invalid characters.`); return; }
+    if (!mno)                                  { clientErrors.push(`Net #${n} (${ref}): Enter the Net ID.`); return; }
+    if (!insp)                                 { clientErrors.push(`Net #${n} (${ref}): Select a Lead Inspector.`); return; }
+    if (Object.values(flds).some(v => v === null)) {
+      clientErrors.push(`Net #${n} (${ref}): Fill in all 8 measurements.`); return;
+    }
+    batch.push({ ref, mno, insp, ...flds });
+  });
+
+  if (clientErrors.length) {
+    say($("msg"),
+      clientErrors[0] + (clientErrors.length > 1 ? ` (+ ${clientErrors.length - 1} more issue${clientErrors.length > 2 ? "s" : ""})` : ""),
+      "bad");
+    return;
+  }
+
+  say($("msg"), `Submitting ${batch.length} measurement${batch.length > 1 ? "s" : ""}…`, "");
+
+  const r = await api("/api/entries/bulk", { method: "POST", body: JSON.stringify(batch) });
+
+  if (!r.ok && (!r.j.saved || r.j.saved === 0)) {
+    say($("msg"), (r.j.errors && r.j.errors[0]) || r.j.error || "Could not save.", "bad");
+    return;
+  }
+
+  if (r.j.errors && r.j.errors.length > 0) {
+    // Partial success
+    say($("msg"),
+      `Saved ${r.j.saved} of ${r.j.total}. Issues: ${r.j.errors.slice(0, 2).join("; ")}`,
+      "bad");
+  } else {
+    // Full success — remember inspector, reset form
+    const lastInsp = batch[batch.length - 1].insp;
+    try { localStorage.setItem("htn_insp", lastInsp); } catch(e) {}
+    say($("msg"),
+      `✓ ${r.j.saved} measurement${r.j.saved !== 1 ? "s" : ""} submitted successfully!`,
+      "ok");
+    $("entryRows").innerHTML = "";
+    rowSeq = 0;
+    addRow();
+  }
+  load();
+};
+
+// =====================================================================
+//  Submitted entries table
+// =====================================================================
 function formatDate(ts) {
   if (!ts) return "–";
   const d = new Date(ts * 1000);
@@ -72,17 +240,17 @@ function formatDate(ts) {
 
 function getFilteredEntries() {
   const sDate = $("filter_start_date") ? $("filter_start_date").value : "";
-  const eDate = $("filter_end_date") ? $("filter_end_date").value : "";
-  const insp = $("filter_insp") ? $("filter_insp").value.toLowerCase().trim() : "";
+  const eDate = $("filter_end_date")   ? $("filter_end_date").value   : "";
+  const insp  = $("filter_insp")       ? $("filter_insp").value.toLowerCase().trim() : "";
 
   const startTs = sDate ? Math.floor(new Date(sDate + "T00:00:00").getTime() / 1000) : null;
-  const endTs = eDate ? Math.floor(new Date(eDate + "T23:59:59").getTime() / 1000) : null;
+  const endTs   = eDate ? Math.floor(new Date(eDate + "T23:59:59").getTime() / 1000) : null;
 
   return entries.filter(e => {
     if (insp && (!e.insp || e.insp.toLowerCase().trim() !== insp)) return false;
     const t = e.created_at || 0;
     if (startTs !== null && t < startTs) return false;
-    if (endTs !== null && t > endTs) return false;
+    if (endTs   !== null && t > endTs)   return false;
     return true;
   });
 }
@@ -98,8 +266,7 @@ function updateInspectorFilter() {
   sel.innerHTML = '<option value="">All Inspectors</option>';
   for (const name of inspectors) {
     const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
+    opt.value = name; opt.textContent = name;
     if (name.toLowerCase() === curr.toLowerCase()) opt.selected = true;
     sel.appendChild(opt);
   }
@@ -108,7 +275,8 @@ function updateInspectorFilter() {
 function render() {
   updateInspectorFilter();
   const list = getFilteredEntries();
-  $("count").textContent = list.length === entries.length ? entries.length : `${list.length} of ${entries.length}`;
+  $("count").textContent = list.length === entries.length
+    ? entries.length : `${list.length} of ${entries.length}`;
   $("rows").innerHTML = "";
   for (const e of list) {
     const tr = document.createElement("tr");
@@ -116,14 +284,17 @@ function render() {
       const td = document.createElement("td"); td.textContent = c; tr.appendChild(td);
     });
     const st = document.createElement("td"), t = document.createElement("span");
-    t.className = "tag" + (e.exported ? "" : " n"); t.textContent = e.exported ? "downloaded" : "new";
+    t.className = "tag" + (e.exported ? "" : " n");
+    t.textContent = e.exported ? "downloaded" : "new";
     st.appendChild(t); tr.appendChild(st);
     const ac = document.createElement("td");
     if (QAO) {
       const b = document.createElement("button"); b.textContent = "Delete"; b.style.padding = "3px 8px";
-      b.onclick = async () => { if (!confirm("Delete " + e.ref + "?")) return;
+      b.onclick = async () => {
+        if (!confirm("Delete " + e.ref + "?")) return;
         const r = await api("/api/entries/" + encodeURIComponent(e.ref), { method: "DELETE" });
-        if (!r.ok) say($("omsg"), r.j.error, "bad"); load(); };
+        if (!r.ok) say($("omsg"), r.j.error, "bad"); load();
+      };
       ac.appendChild(b);
     }
     tr.appendChild(ac); $("rows").appendChild(tr);
@@ -131,21 +302,20 @@ function render() {
 }
 
 async function load() {
-  try { const r = await api("/api/entries"); if (r.ok) { entries = r.j; render(); } } catch (e) {}
+  try { const r = await api("/api/entries"); if (r.ok) { entries = r.j; render(); } } catch(e) {}
 }
-load(); setInterval(load, 15000);   // other inspectors' entries appear within 15 s
+load(); setInterval(load, 15000);
 
 if ($("filter_start_date")) $("filter_start_date").onchange = render;
-if ($("filter_end_date")) $("filter_end_date").onchange = render;
-if ($("filter_insp")) $("filter_insp").onchange = render;
+if ($("filter_end_date"))   $("filter_end_date").onchange   = render;
+if ($("filter_insp"))       $("filter_insp").onchange       = render;
 
 if ($("btn_today")) {
   $("btn_today").onclick = () => {
-    const now = new Date();
-    const pad = n => String(n).padStart(2, "0");
+    const now = new Date(), pad = n => String(n).padStart(2, "0");
     const today = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
     $("filter_start_date").value = today;
-    $("filter_end_date").value = today;
+    $("filter_end_date").value   = today;
     render();
   };
 }
@@ -153,27 +323,37 @@ if ($("btn_today")) {
 if ($("btn_clear_filters")) {
   $("btn_clear_filters").onclick = () => {
     if ($("filter_start_date")) $("filter_start_date").value = "";
-    if ($("filter_end_date")) $("filter_end_date").value = "";
-    if ($("filter_insp")) $("filter_insp").value = "";
+    if ($("filter_end_date"))   $("filter_end_date").value   = "";
+    if ($("filter_insp"))       $("filter_insp").value       = "";
     render();
   };
 }
 
+// =====================================================================
+//  QAO-only section (download + user management)
+// =====================================================================
 if (QAO) {
-  $("dl").onclick = () => { $("withref").value = "0"; $("export_format").value = "xlsx"; setTimeout(load, 1500); };
+  $("dl").onclick  = () => { $("withref").value = "0"; $("export_format").value = "xlsx"; setTimeout(load, 1500); };
   $("dlc").onclick = () => { $("withref").value = "1"; $("export_format").value = "xlsx"; };
   if ($("dl_csv")) $("dl_csv").onclick = () => { $("withref").value = "0"; $("export_format").value = "csv"; setTimeout(load, 1500); };
-  $("exp").addEventListener("submit", () => say($("omsg"), "Download started. You can open the file in Excel or copy records into your workbook.", "ok"));
+  $("exp").addEventListener("submit", () =>
+    say($("omsg"), "Download started. You can open the file in Excel or copy records into your workbook.", "ok"));
+
   $("cp").onclick = async () => {
     const fd = new FormData($("exp")); fd.set("withref", "0"); fd.set("format", "tsv");
     const r = await fetch("/export", { method: "POST", body: fd, headers: { "X-CSRF": CSRF } });
     const text = await r.text(), n = r.headers.get("X-Rows");
     if (!r.ok || !text) return say($("omsg"), "Nothing to copy.", "bad");
-    try { await navigator.clipboard.writeText(text); say($("omsg"), "Copied " + n + " rows. Paste into column X of the first matching row.", "ok"); load(); }
-    catch (e) { say($("omsg"), "Copy was blocked. Use the download button instead.", "bad"); }
+    try {
+      await navigator.clipboard.writeText(text);
+      say($("omsg"), "Copied " + n + " rows. Paste into column X of the first matching row.", "ok");
+      load();
+    } catch(e) {
+      say($("omsg"), "Copy was blocked. Use the download button instead.", "bad");
+    }
   };
 
-  // User management
+  // ---- User management ----
   if ($("userSection")) {
     let usersList = [];
     const userSay = (t, c) => say($("userMsg"), t, c);
@@ -187,25 +367,17 @@ if (QAO) {
     };
 
     async function loadUsers() {
-      try {
-        const r = await api("/api/users");
-        if (r.ok) {
-          usersList = r.j;
-          renderUsers();
-        }
-      } catch (e) {}
+      try { const r = await api("/api/users"); if (r.ok) { usersList = r.j; renderUsers(); } } catch(e) {}
     }
 
     function renderUsers() {
-      const inspectorsOnly = usersList.filter(u => u.role === "inspector");
-      $("userCount").textContent = inspectorsOnly.length;
+      $("userCount").textContent = usersList.filter(u => u.role === "inspector").length;
       const tbody = $("userRows");
       tbody.innerHTML = "";
 
       for (const u of usersList) {
         const tr = document.createElement("tr");
 
-        // Name column
         const tdName = document.createElement("td");
         tdName.textContent = u.name || "—";
         tr.appendChild(tdName);
@@ -222,62 +394,50 @@ if (QAO) {
         tr.appendChild(tdRole);
 
         const tdAct = document.createElement("td");
-        tdAct.style.display = "flex";
-        tdAct.style.gap = "6px";
+        tdAct.style.display = "flex"; tdAct.style.gap = "6px";
 
         if (u.role === "inspector") {
+          // Edit Name
           const bName = document.createElement("button");
-          bName.textContent = "Edit Name";
-          bName.style.padding = "3px 8px";
-          bName.style.fontSize = "12px";
+          bName.textContent = "Edit Name"; bName.style.cssText = "padding:3px 8px;font-size:12px";
           bName.onclick = async () => {
             const nn = prompt("Enter display name for " + u.email + ":", u.name || "");
             if (nn === null) return;
-            const r = await api("/api/users/" + u.id, {
-              method: "PUT",
-              body: JSON.stringify({ name: nn.trim() })
-            });
-            if (r.ok) { userSay("Name updated.", "ok"); loadUsers(); loadInspectors(); }
-            else userSay(r.j.error || "Failed.", "bad");
+            const r = await api("/api/users/" + u.id, { method: "PUT", body: JSON.stringify({ name: nn.trim() }) });
+            if (r.ok) {
+              userSay("Name updated.", "ok"); loadUsers();
+              await loadInspectorsCache();
+              document.querySelectorAll(".f-insp").forEach(sel => populateInspectorSelect(sel));
+            } else userSay(r.j.error || "Failed.", "bad");
           };
           tdAct.appendChild(bName);
 
+          // Reset Password
           const bReset = document.createElement("button");
-          bReset.textContent = "Reset Password";
-          bReset.style.padding = "3px 8px";
-          bReset.style.fontSize = "12px";
+          bReset.textContent = "Reset Password"; bReset.style.cssText = "padding:3px 8px;font-size:12px";
           bReset.onclick = async () => {
-            const np = prompt("Enter new password for " + u.email + " (min 4 characters):");
+            const np = prompt("New password for " + u.email + " (min 4 chars):");
             if (!np) return;
             if (np.trim().length < 4) return alert("Password must be at least 4 characters.");
-            const r = await api("/api/users/" + u.id, {
-              method: "PUT",
-              body: JSON.stringify({ password: np.trim() })
-            });
-            if (r.ok) { userSay("Password updated for " + u.email + ".", "ok"); }
+            const r = await api("/api/users/" + u.id, { method: "PUT", body: JSON.stringify({ password: np.trim() }) });
+            if (r.ok) userSay("Password updated for " + u.email + ".", "ok");
             else userSay(r.j.error || "Failed to update password.", "bad");
           };
           tdAct.appendChild(bReset);
 
+          // Delete
           const bDel = document.createElement("button");
-          bDel.textContent = "Delete";
-          bDel.style.padding = "3px 8px";
-          bDel.style.fontSize = "12px";
+          bDel.textContent = "Delete"; bDel.style.cssText = "padding:3px 8px;font-size:12px";
           bDel.onclick = async () => {
-            if (!confirm("Are you sure you want to remove inspector " + u.email + "?")) return;
+            if (!confirm("Remove inspector " + u.email + "?")) return;
             const r = await api("/api/users/" + u.id, { method: "DELETE" });
-            if (r.ok) {
-              userSay("Removed inspector " + u.email + ".", "ok");
-              loadUsers();
-            } else {
-              userSay(r.j.error || "Could not delete user.", "bad");
-            }
+            if (r.ok) { userSay("Removed " + u.email + ".", "ok"); loadUsers(); }
+            else userSay(r.j.error || "Could not delete user.", "bad");
           };
           tdAct.appendChild(bDel);
         } else {
           const span = document.createElement("span");
-          span.style.color = "var(--mut)";
-          span.style.fontSize = "12px";
+          span.style.cssText = "color:var(--mut);font-size:12px";
           span.textContent = "Active admin";
           tdAct.appendChild(span);
         }
@@ -288,9 +448,9 @@ if (QAO) {
     }
 
     $("btn_create_user").onclick = async () => {
-      const name = $("new_user_name").value.trim();
+      const name  = $("new_user_name").value.trim();
       const email = $("new_user_email").value.trim();
-      const pw = $("new_user_pw").value;
+      const pw    = $("new_user_pw").value;
       if (!email || !pw) return userSay("Enter both email and password.", "bad");
       if (pw.length < 4) return userSay("Password must be at least 4 characters.", "bad");
 
@@ -300,11 +460,10 @@ if (QAO) {
       });
       if (r.ok) {
         userSay("Inspector " + (name || email) + " created successfully!", "ok");
-        $("new_user_name").value = "";
-        $("new_user_email").value = "";
-        $("new_user_pw").value = "";
+        $("new_user_name").value = ""; $("new_user_email").value = ""; $("new_user_pw").value = "";
         loadUsers();
-        loadInspectors();
+        await loadInspectorsCache();
+        document.querySelectorAll(".f-insp").forEach(sel => populateInspectorSelect(sel));
       } else {
         userSay(r.j.error || "Could not create user.", "bad");
       }
@@ -313,4 +472,3 @@ if (QAO) {
     loadUsers();
   }
 }
-
