@@ -21,11 +21,11 @@ async function loadInspectors() {
     const sel = $("insp");
     const prev = localStorage.getItem("htn_insp") || "";
     sel.innerHTML = '<option value="">\u2014 select inspector \u2014</option>';
-    for (const name of r.j) {
+    for (const insp of r.j) {
       const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      if (name === prev) opt.selected = true;
+      opt.value = insp.name;   // store display name in the insp field
+      opt.textContent = insp.name;
+      if (insp.name === prev) opt.selected = true;
       sel.appendChild(opt);
     }
   } catch (e) {}
@@ -205,6 +205,11 @@ if (QAO) {
       for (const u of usersList) {
         const tr = document.createElement("tr");
 
+        // Name column
+        const tdName = document.createElement("td");
+        tdName.textContent = u.name || "—";
+        tr.appendChild(tdName);
+
         const tdEmail = document.createElement("td");
         tdEmail.textContent = u.email;
         tr.appendChild(tdEmail);
@@ -221,6 +226,22 @@ if (QAO) {
         tdAct.style.gap = "6px";
 
         if (u.role === "inspector") {
+          const bName = document.createElement("button");
+          bName.textContent = "Edit Name";
+          bName.style.padding = "3px 8px";
+          bName.style.fontSize = "12px";
+          bName.onclick = async () => {
+            const nn = prompt("Enter display name for " + u.email + ":", u.name || "");
+            if (nn === null) return;
+            const r = await api("/api/users/" + u.id, {
+              method: "PUT",
+              body: JSON.stringify({ name: nn.trim() })
+            });
+            if (r.ok) { userSay("Name updated.", "ok"); loadUsers(); loadInspectors(); }
+            else userSay(r.j.error || "Failed.", "bad");
+          };
+          tdAct.appendChild(bName);
+
           const bReset = document.createElement("button");
           bReset.textContent = "Reset Password";
           bReset.style.padding = "3px 8px";
@@ -233,11 +254,8 @@ if (QAO) {
               method: "PUT",
               body: JSON.stringify({ password: np.trim() })
             });
-            if (r.ok) {
-              userSay("Password updated for " + u.email + ".", "ok");
-            } else {
-              userSay(r.j.error || "Failed to update password.", "bad");
-            }
+            if (r.ok) { userSay("Password updated for " + u.email + ".", "ok"); }
+            else userSay(r.j.error || "Failed to update password.", "bad");
           };
           tdAct.appendChild(bReset);
 
@@ -270,6 +288,7 @@ if (QAO) {
     }
 
     $("btn_create_user").onclick = async () => {
+      const name = $("new_user_name").value.trim();
       const email = $("new_user_email").value.trim();
       const pw = $("new_user_pw").value;
       if (!email || !pw) return userSay("Enter both email and password.", "bad");
@@ -277,13 +296,15 @@ if (QAO) {
 
       const r = await api("/api/users", {
         method: "POST",
-        body: JSON.stringify({ email, password: pw, role: "inspector" })
+        body: JSON.stringify({ email, password: pw, role: "inspector", name })
       });
       if (r.ok) {
-        userSay("Inspector " + email + " created successfully!", "ok");
+        userSay("Inspector " + (name || email) + " created successfully!", "ok");
+        $("new_user_name").value = "";
         $("new_user_email").value = "";
         $("new_user_pw").value = "";
         loadUsers();
+        loadInspectors();
       } else {
         userSay(r.j.error || "Could not create user.", "bad");
       }

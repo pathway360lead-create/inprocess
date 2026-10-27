@@ -37,7 +37,8 @@ FIELDS = ["l1", "l2", "w1", "w2", "h1", "h2", "h3", "c4"]
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('qao','inspector')));
+  role TEXT NOT NULL CHECK(role IN ('qao','inspector')),
+  name TEXT);
 CREATE TABLE IF NOT EXISTS dimensions(
   ref TEXT PRIMARY KEY, mno REAL NOT NULL, insp TEXT NOT NULL,
   l1 REAL, l2 REAL, w1 REAL, w2 REAL, h1 REAL, h2 REAL, h3 REAL, c4 REAL,
@@ -59,6 +60,11 @@ def _close(_):
 
 with sqlite3.connect(DB_PATH) as _c:
     _c.executescript(SCHEMA)
+    # migration: add name column to existing databases that pre-date this field
+    cols = [r[1] for r in _c.execute("PRAGMA table_info(users)")]
+    if "name" not in cols:
+        _c.execute("ALTER TABLE users ADD COLUMN name TEXT")
+        _c.commit()
 
 def purge():
     cutoff = int(time.time()) - PURGE_DAYS * 86400
@@ -140,21 +146,23 @@ def list_entries():
 @app.get("/api/inspectors")
 @login_required()
 def api_list_inspectors():
-    """Return the list of inspector email addresses for the Lead Inspector dropdown."""
-    inspectors = [
-        row["email"]
-        for row in db().execute(
-            "SELECT email FROM users WHERE role='inspector' ORDER BY email"
-        )
-    ]
-    return jsonify(inspectors)
+    """Return inspector display names for the Lead Inspector dropdown.
+    Falls back to the local part of the email if no name has been set."""
+    rows_out = []
+    for row in db().execute(
+        "SELECT email, name FROM users WHERE role='inspector' ORDER BY LOWER(COALESCE(NULLIF(name,''),email))"
+    ):
+        display = (row["name"] or "").strip() or row["email"].split("@")[0]
+        rows_out.append({"email": row["email"], "name": display})
+    return jsonify(rows_out)
 
 # ---------- user management (QAO only) ----------
 @app.get("/api/users")
 @login_required("qao")
 def api_list_users():
-    u_list = [{"id": u["id"], "email": u["email"], "role": u["role"]}
-              for u in db().execute("SELECT id, email, role FROM users ORDER BY role, email")]
+    u_list = [{"id": u["id"], "email": u["email"], "role": u["role"],
+               "name": (u["name"] or "").strip()}
+              for u in db().execute("SELECT id, email, role, name FROM users ORDER BY role, email")]
     return jsonify(u_list)
 
 @app.post("/api/users")
@@ -164,6 +172,7 @@ def api_create_user():
     email = str(d.get("email", "")).strip().lower()
     password = str(d.get("password", "")).strip()
     role = str(d.get("role", "inspector")).strip().lower()
+    name = str(d.get("name", "")).strip()[:80]
 
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         return jsonify(error="Enter a valid email address."), 400
@@ -176,8 +185,8 @@ def api_create_user():
     if existing:
         return jsonify(error=f"User with email '{email}' already exists."), 409
 
-    db().execute("INSERT INTO users(email, pw, role) VALUES(?, ?, ?)",
-                 (email, generate_password_hash(password), role))
+    db().execute("INSERT INTO users(email, pw, role, name) VALUES(?, ?, ?, ?)",
+                 (email, generate_password_hash(password), role, name or None))
     db().commit()
     return jsonify(ok=True)
 
@@ -191,6 +200,7 @@ def api_update_user(user_id):
 
     new_pw = d.get("password")
     new_email = d.get("email")
+    new_name = d.get("name")
 
     if new_pw is not None:
         new_pw = str(new_pw).strip()
@@ -208,6 +218,9 @@ def api_update_user(user_id):
         db().execute("UPDATE users SET email=? WHERE id=?", (new_email, user_id))
         if user_id == session.get("uid"):
             session["email"] = new_email
+
+    if new_name is not None:
+        db().execute("UPDATE users SET name=? WHERE id=?", (str(new_name).strip()[:80] or None, user_id))
 
     db().commit()
     return jsonify(ok=True)

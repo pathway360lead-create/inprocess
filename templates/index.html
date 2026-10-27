@@ -88,6 +88,10 @@
     <div style="background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:14px">
       <h3 style="font-size:13px;margin:0 0 10px;font-weight:600">Create new inspector account</h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:160px">
+          <label style="font-size:12px;color:var(--mut);margin-bottom:3px">Full Name</label>
+          <input id="new_user_name" type="text" placeholder="e.g. John Doe" autocomplete="off" style="padding:7px 10px;font-size:13px">
+        </div>
         <div style="flex:1;min-width:200px">
           <label style="font-size:12px;color:var(--mut);margin-bottom:3px">Email</label>
           <input id="new_user_email" type="email" placeholder="inspector@company.com" autocomplete="off" style="padding:7px 10px;font-size:13px">
@@ -107,6 +111,7 @@
       <table>
         <thead>
           <tr>
+            <th>Name</th>
             <th>Email</th>
             <th>Role</th>
             <th>Actions</th>
