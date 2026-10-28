@@ -452,7 +452,10 @@ def export():
         row = ([r["ref"]] if with_ref else []) + [parse_val(r["mno"]), str(r["insp"])] + [parse_val(r[f]) for f in FIELDS]
         data_rows.append(row)
 
-    if data and not with_ref:
+    # Only mark rows as "downloaded" when the QAO explicitly chose
+    # "only not yet downloaded" — this lets them re-download freely
+    # without entries disappearing from future downloads.
+    if data and only_new and not with_ref:
         now = int(time.time())
         db().executemany("UPDATE dimensions SET exported=1, exported_at=? WHERE ref=?", [(now, r["ref"]) for r in data])
         db().commit()
