@@ -399,6 +399,11 @@ def make_xlsx(headers, data_rows):
     return bio.getvalue()
 
 def parse_date_to_ts(d_str, end_of_day=False):
+    """Convert a YYYY-MM-DD string to a UTC Unix timestamp.
+    All created_at values in the DB are stored as UTC epoch (time.time()),
+    so we must also interpret the date filter in UTC to avoid off-by-one-day
+    errors on servers in non-UTC timezones.
+    """
     if not d_str:
         return None
     try:
@@ -406,9 +411,9 @@ def parse_date_to_ts(d_str, end_of_day=False):
         if len(parts) == 3:
             y, m, d = parts
             if end_of_day:
-                dt = datetime.datetime(y, m, d, 23, 59, 59)
+                dt = datetime.datetime(y, m, d, 23, 59, 59, tzinfo=datetime.timezone.utc)
             else:
-                dt = datetime.datetime(y, m, d, 0, 0, 0)
+                dt = datetime.datetime(y, m, d, 0, 0, 0, tzinfo=datetime.timezone.utc)
             return int(dt.timestamp())
     except Exception:
         pass

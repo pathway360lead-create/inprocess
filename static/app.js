@@ -222,6 +222,10 @@ $("submitAll").onclick = async () => {
     $("entryRows").innerHTML = "";
     rowSeq = 0;
     addRow();
+    // Clear any active date filters so the newly submitted rows are visible
+    if ($("filter_start_date")) $("filter_start_date").value = "";
+    if ($("filter_end_date"))   $("filter_end_date").value   = "";
+    if ($("filter_insp"))       $("filter_insp").value       = "";
     await load();   // refresh table BEFORE showing success message
     say($("msg"),
       `✓ ${r.j.saved} measurement${r.j.saved !== 1 ? "s" : ""} submitted successfully!`,
