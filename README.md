@@ -135,3 +135,4 @@ Then click **Reload** on the Web tab.
 | v1.4 | 2026-10-27 | Lead Inspector dropdown populated from registered inspectors |
 | v1.5 | 2026-10-27 | Inspector display names (name field instead of email in dropdown) |
 | v2.0 | 2026-10-27 | **Bulk multi-row entry** — add multiple nets, submit all at once |
+| v2.1 | 2026-10-28 | **Bug fix**: date-filter for Excel/CSV export now uses UTC epoch (was local time, caused off-by-one-day on non-UTC servers); table display filters are automatically cleared after a successful bulk submit so newly entered rows are always visible |
