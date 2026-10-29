@@ -142,7 +142,6 @@ function addRow() {
   const allRows = document.querySelectorAll(".entry-row");
   let prevInsp = localStorage.getItem("htn_insp") || "";
   let prevRef = localStorage.getItem("htn_ref") || "";
-  let nextMno = "";
 
   if (allRows.length > 0) {
     const lastRow = allRows[allRows.length - 1];
@@ -151,22 +150,14 @@ function addRow() {
 
     const lastRef = lastRow.querySelector(".f-ref").value.trim();
     if (lastRef) prevRef = lastRef;
-
-    const lastMnoRaw = lastRow.querySelector(".f-mno").value.trim();
-    const lastMno = parseFloat(lastMnoRaw);
-    if (!isNaN(lastMno)) {
-      nextMno = lastMno + 1;
-    }
   }
 
-  const row = createRow(prevInsp, prevRef, nextMno);
+  const row = createRow(prevInsp, prevRef, "");
   $("entryRows").appendChild(row);
   updateRowNumbers();
   row.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
-  if (prevRef && nextMno !== "") {
-    setTimeout(() => row.querySelector(".f-l1").focus(), 150);
-  } else if (prevRef) {
+  if (prevRef) {
     setTimeout(() => row.querySelector(".f-mno").focus(), 150);
   } else {
     setTimeout(() => row.querySelector(".f-ref").focus(), 150);
@@ -179,19 +170,39 @@ function addRow() {
   addRow();
 })();
 
-$("addRow").onclick = addRow;
+if ($("addRow")) $("addRow").onclick = addRow;
+if ($("addRowTop")) $("addRowTop").onclick = addRow;
 
-$("clearAll").onclick = () => {
-  if (document.querySelectorAll(".entry-row").length > 1) {
-    if (!confirm("Clear all rows and start fresh?")) return;
-  }
-  $("entryRows").innerHTML = "";
-  rowSeq = 0;
-  say($("msg"));
-  addRow();
-};
+if ($("removeNet")) {
+  $("removeNet").onclick = () => {
+    const allRows = document.querySelectorAll(".entry-row");
+    if (allRows.length <= 1) {
+      say($("msg"), "You need at least one row.", "bad");
+      return;
+    }
+    const lastRow = allRows[allRows.length - 1];
+    lastRow.style.opacity = "0.4";
+    setTimeout(() => {
+      lastRow.remove();
+      updateRowNumbers();
+      say($("msg"));
+    }, 120);
+  };
+}
 
-$("submitAll").onclick = async () => {
+if ($("clearAll")) {
+  $("clearAll").onclick = () => {
+    if (document.querySelectorAll(".entry-row").length > 1) {
+      if (!confirm("Clear all rows and start fresh?")) return;
+    }
+    $("entryRows").innerHTML = "";
+    rowSeq = 0;
+    say($("msg"));
+    addRow();
+  };
+}
+
+const doSubmitAll = async () => {
   const rowEls = [...document.querySelectorAll(".entry-row")];
   const batch = [];
   const clientErrors = [];
@@ -259,6 +270,9 @@ $("submitAll").onclick = async () => {
       "ok");
   }
 };
+
+if ($("submitAll")) $("submitAll").onclick = doSubmitAll;
+if ($("submitAllTop")) $("submitAllTop").onclick = doSubmitAll;
 
 // =====================================================================
 //  Submitted entries table

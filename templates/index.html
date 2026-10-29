@@ -14,13 +14,19 @@
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
   <h2 style="margin:0">New measurements &nbsp;<span class="tag" id="rowCount">0</span></h2>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button type="button" class="p" id="addRow">＋ Add Net</button>
-    <button type="button" id="submitAll">Submit All</button>
-    <button type="button" id="clearAll">Clear All</button>
+    <button type="button" class="p" id="addRowTop">＋ Add Net</button>
+    <button type="button" id="submitAllTop">Submit All</button>
   </div>
 </div>
 <div class="msg" id="msg"></div>
 <div id="entryRows"></div>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px;padding-top:14px;border-top:1px dashed var(--bd)">
+  <button type="button" class="p" id="addRow" style="padding:9px 18px;font-size:14px">＋ Add Net</button>
+  <button type="button" id="removeNet" style="padding:9px 16px;font-size:14px;background:none;border:1px solid var(--bd);border-radius:8px;color:var(--tx);cursor:pointer">✕ Remove Net</button>
+  <button type="button" id="submitAll" class="p" style="padding:9px 22px;font-size:14px">Submit All</button>
+  <button type="button" id="clearAll" style="padding:9px 14px;font-size:13px;background:none;border:none;color:var(--mut);cursor:pointer">Clear All</button>
+</div>
 </section>
 
 <section class="card">

@@ -273,27 +273,18 @@ def save_entry():
     mno_raw = str(d.get("mno", "")).strip()[:60]
     if not mno_raw:
         return jsonify(error="Enter the Net ID."), 400
-    mno_num = num(mno_raw)
-    mno = mno_num if mno_num is not None else mno_raw
+    try:
+        mno_val = float(mno_raw)
+        mno = int(mno_val) if mno_val.is_integer() else mno_val
+    except (ValueError, TypeError):
+        mno = mno_raw
     vals = [num(d.get(f)) for f in FIELDS]
     if any(v is None for v in vals):
         return jsonify(error="Fill in every dimension reading (numbers only)."), 400
-    now = int(time.time()); me = session["uid"]; qao = session["role"] == "qao"
-    ex = db().execute("SELECT * FROM dimensions WHERE ref=? AND mno=?", (ref, mno)).fetchone()
-    if ex:
-        if not qao and ex["uid"] != me:
-            return jsonify(error=f"Ref No. {ref} Net ID {mno} was already submitted by {ex['insp']}."), 409
-        if not qao and ex["exported"]:
-            return jsonify(error=f"Ref No. {ref} Net ID {mno} was already downloaded by the QA officer. Ask them to correct it."), 409
-        if not d.get("replace"):
-            return jsonify(error="exists", exists=True), 409
-        db().execute("UPDATE dimensions SET mno=?,insp=?,l1=?,l2=?,w1=?,w2=?,h1=?,h2=?,h3=?,c4=?,"
-                     "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE id=?",
-                     [mno, insp, *vals, session["email"], now, ex["id"]])
-    else:
-        db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
-                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                     [ref, mno, insp, *vals, me, session["email"], now, now])
+    now = int(time.time()); me = session["uid"]
+    db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
+                 " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 [ref, mno, insp, *vals, me, session["email"], now, now])
     db().commit(); purge()
     return jsonify(ok=True)
 
@@ -334,29 +325,20 @@ def save_entries_bulk():
         if not mno_raw:
             results.append({"ref": ref, "ok": False,
                             "error": f"{label} ({ref}): Enter the Net ID."}); continue
-        mno_num = num(mno_raw); mno = mno_num if mno_num is not None else mno_raw
+        try:
+            mno_val = float(mno_raw)
+            mno = int(mno_val) if mno_val.is_integer() else mno_val
+        except (ValueError, TypeError):
+            mno = mno_raw
 
         vals = [num(d.get(f)) for f in FIELDS]
         if any(v is None for v in vals):
             results.append({"ref": ref, "ok": False,
                             "error": f"{label} ({ref}): Fill in all 8 measurements."}); continue
 
-        # Check if an entry with the same Ref No AND Net ID already exists
-        ex = db().execute("SELECT * FROM dimensions WHERE ref=? AND mno=?", (ref, mno)).fetchone()
-        if ex:
-            if not qao and ex["uid"] != me:
-                results.append({"ref": ref, "ok": False,
-                                "error": f"{label} ({ref} Net {mno}): Already submitted by {ex['insp']}."}); continue
-            if not qao and ex["exported"]:
-                results.append({"ref": ref, "ok": False,
-                                "error": f"{label} ({ref} Net {mno}): Already downloaded by QAO."}); continue
-            db().execute("UPDATE dimensions SET mno=?,insp=?,l1=?,l2=?,w1=?,w2=?,h1=?,h2=?,h3=?,c4=?,"
-                         "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE id=?",
-                         [mno, insp, *vals, session["email"], now, ex["id"]])
-        else:
-            db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
-                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                         [ref, mno, insp, *vals, me, session["email"], now, now])
+        db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
+                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     [ref, mno, insp, *vals, me, session["email"], now, now])
         results.append({"ref": ref, "ok": True})
 
     saved = sum(1 for r in results if r["ok"])
