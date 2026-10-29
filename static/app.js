@@ -66,7 +66,7 @@ function updateRowNumbers() {
   if (rc) rc.textContent = document.querySelectorAll(".entry-row").length;
 }
 
-function createRow(prevInsp) {
+function createRow(prevInsp, prevRef, nextMno) {
   rowSeq++;
   const div = document.createElement("div");
   div.className = "entry-row";
@@ -80,6 +80,9 @@ function createRow(prevInsp) {
   ].join(";");
   div.dataset.rid = rowSeq;
 
+  const initRef = prevRef !== undefined ? prevRef : (localStorage.getItem("htn_ref") || "");
+  const initMno = nextMno !== undefined && nextMno !== null ? nextMno : "";
+
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span class="row-num" style="font-weight:700;font-size:13px;color:var(--acc);letter-spacing:.3px">Net #1</span>
@@ -89,9 +92,9 @@ function createRow(prevInsp) {
     </div>
     <div class="grid">
       <div><label>Ref No. (as in Excel)</label>
-           <input class="f-ref" placeholder="26-01" autocomplete="off"></div>
+           <input class="f-ref" placeholder="26-01" autocomplete="off" value="${initRef}"></div>
       <div><label>Net ID</label>
-           <input class="f-mno" placeholder="e.g. 1" autocomplete="off"></div>
+           <input class="f-mno" placeholder="e.g. 1" autocomplete="off" value="${initMno}"></div>
       <div><label>Lead Inspector</label>
            <select class="f-insp"
              style="width:100%;padding:8px 10px;font-size:14px;border:1px solid var(--bd);
@@ -138,16 +141,36 @@ function createRow(prevInsp) {
 function addRow() {
   const allRows = document.querySelectorAll(".entry-row");
   let prevInsp = localStorage.getItem("htn_insp") || "";
+  let prevRef = localStorage.getItem("htn_ref") || "";
+  let nextMno = "";
+
   if (allRows.length > 0) {
-    const lastInsp = allRows[allRows.length - 1].querySelector(".f-insp").value;
+    const lastRow = allRows[allRows.length - 1];
+    const lastInsp = lastRow.querySelector(".f-insp").value;
     if (lastInsp) prevInsp = lastInsp;
+
+    const lastRef = lastRow.querySelector(".f-ref").value.trim();
+    if (lastRef) prevRef = lastRef;
+
+    const lastMnoRaw = lastRow.querySelector(".f-mno").value.trim();
+    const lastMno = parseFloat(lastMnoRaw);
+    if (!isNaN(lastMno)) {
+      nextMno = lastMno + 1;
+    }
   }
-  const row = createRow(prevInsp);
+
+  const row = createRow(prevInsp, prevRef, nextMno);
   $("entryRows").appendChild(row);
   updateRowNumbers();
-  // Scroll to new row and focus Ref No.
   row.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  setTimeout(() => row.querySelector(".f-ref").focus(), 150);
+
+  if (prevRef && nextMno !== "") {
+    setTimeout(() => row.querySelector(".f-l1").focus(), 150);
+  } else if (prevRef) {
+    setTimeout(() => row.querySelector(".f-mno").focus(), 150);
+  } else {
+    setTimeout(() => row.querySelector(".f-ref").focus(), 150);
+  }
 }
 
 // Initialise with one row after inspectors are loaded
@@ -216,9 +239,13 @@ $("submitAll").onclick = async () => {
       "bad");
     await load();   // refresh table even on partial success
   } else {
-    // Full success — remember inspector, reset form
+    // Full success — remember inspector and ref no, reset form
     const lastInsp = batch[batch.length - 1].insp;
-    try { localStorage.setItem("htn_insp", lastInsp); } catch(e) {}
+    const lastRef  = batch[batch.length - 1].ref;
+    try {
+      localStorage.setItem("htn_insp", lastInsp);
+      localStorage.setItem("htn_ref", lastRef);
+    } catch(e) {}
     $("entryRows").innerHTML = "";
     rowSeq = 0;
     addRow();
@@ -296,8 +323,9 @@ function render() {
     if (QAO) {
       const b = document.createElement("button"); b.textContent = "Delete"; b.style.padding = "3px 8px";
       b.onclick = async () => {
-        if (!confirm("Delete " + e.ref + "?")) return;
-        const r = await api("/api/entries/" + encodeURIComponent(e.ref), { method: "DELETE" });
+        const target = e.id !== undefined ? e.id : e.ref;
+        if (!confirm(`Delete Ref "${e.ref}" (Net ${e.mno})?`)) return;
+        const r = await api("/api/entries/" + encodeURIComponent(target), { method: "DELETE" });
         if (!r.ok) say($("omsg"), r.j.error, "bad"); load();
       };
       ac.appendChild(b);

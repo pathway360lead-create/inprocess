@@ -67,10 +67,10 @@ instance/         Auto-created SQLite database and secret key (never committed t
 
 ```sql
 users(id, email UNIQUE, pw, role CHECK('qao','inspector'), name TEXT)
-dimensions(ref PK, mno, insp, l1, l2, w1, w2, h1, h2, h3, c4,
+dimensions(id PK AUTOINCREMENT, ref, mno, insp, l1, l2, w1, w2, h1, h2, h3, c4,
            uid, by_email, created_at, updated_at, exported, exported_at)
 ```
-- Auto-migration adds the `name` column to existing databases on startup.
+- Auto-migration adds the `name` column to users and migrates `dimensions` to use an auto-increment `id` primary key so multiple nets can share the same Ref No.
 
 ## 1. Run Locally
 
@@ -136,3 +136,4 @@ Then click **Reload** on the Web tab.
 | v1.5 | 2026-10-27 | Inspector display names (name field instead of email in dropdown) |
 | v2.0 | 2026-10-27 | **Bulk multi-row entry** — add multiple nets, submit all at once |
 | v2.1 | 2026-10-28 | **Bug fix**: date-filter for Excel/CSV export now uses UTC epoch (was local time, caused off-by-one-day on non-UTC servers); table display filters are automatically cleared after a successful bulk submit so newly entered rows are always visible |
+| v2.2 | 2026-10-29 | **Bug fix**: migrated `dimensions` primary key from `ref` to `id AUTOINCREMENT` so multiple nets can share the same Ref No (e.g. 10 to 21 nets for batch 26-01). Previously, each row with the same Ref No overwritten the prior row, leaving only 1 entry. Entries now keyed by `(ref, mno)`. Auto-fills Ref No and increments Net ID when clicking ＋ Add Net. |

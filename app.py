@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS users(
   role TEXT NOT NULL CHECK(role IN ('qao','inspector')),
   name TEXT);
 CREATE TABLE IF NOT EXISTS dimensions(
-  ref TEXT PRIMARY KEY, mno REAL NOT NULL, insp TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref TEXT NOT NULL, mno REAL NOT NULL, insp TEXT NOT NULL,
   l1 REAL, l2 REAL, w1 REAL, w2 REAL, h1 REAL, h2 REAL, h3 REAL, c4 REAL,
   uid INTEGER NOT NULL, by_email TEXT NOT NULL, created_at INTEGER, updated_at INTEGER,
   exported INTEGER NOT NULL DEFAULT 0, exported_at INTEGER);
@@ -64,6 +65,28 @@ with sqlite3.connect(DB_PATH) as _c:
     cols = [r[1] for r in _c.execute("PRAGMA table_info(users)")]
     if "name" not in cols:
         _c.execute("ALTER TABLE users ADD COLUMN name TEXT")
+        _c.commit()
+
+    # migration: add auto-increment id primary key to dimensions so multiple nets
+    # can share the same Ref No (e.g. 10 to 21 nets per batch)
+    dim_cols = [r[1] for r in _c.execute("PRAGMA table_info(dimensions)")]
+    if "id" not in dim_cols:
+        _c.execute("""
+        CREATE TABLE IF NOT EXISTS dimensions_new(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ref TEXT NOT NULL, mno REAL NOT NULL, insp TEXT NOT NULL,
+          l1 REAL, l2 REAL, w1 REAL, w2 REAL, h1 REAL, h2 REAL, h3 REAL, c4 REAL,
+          uid INTEGER NOT NULL, by_email TEXT NOT NULL, created_at INTEGER, updated_at INTEGER,
+          exported INTEGER NOT NULL DEFAULT 0, exported_at INTEGER
+        );
+        """)
+        _c.execute("""
+        INSERT INTO dimensions_new(ref, mno, insp, l1, l2, w1, w2, h1, h2, h3, c4, uid, by_email, created_at, updated_at, exported, exported_at)
+        SELECT ref, mno, insp, l1, l2, w1, w2, h1, h2, h3, c4, uid, by_email, created_at, updated_at, exported, exported_at
+        FROM dimensions;
+        """)
+        _c.execute("DROP TABLE dimensions;")
+        _c.execute("ALTER TABLE dimensions_new RENAME TO dimensions;")
         _c.commit()
 
 def purge():
@@ -125,11 +148,11 @@ def index():
 
 # ---------- data ----------
 def natkey(ref):
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", ref)]
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", str(ref))]
 
 def rows():
     out = [dict(r) for r in db().execute("SELECT * FROM dimensions")]
-    return sorted(out, key=lambda r: natkey(r["ref"]))
+    return sorted(out, key=lambda r: (natkey(r["ref"]), num(r["mno"]) or 0, r.get("id") or 0))
 
 def num(v):
     try:
@@ -256,17 +279,17 @@ def save_entry():
     if any(v is None for v in vals):
         return jsonify(error="Fill in every dimension reading (numbers only)."), 400
     now = int(time.time()); me = session["uid"]; qao = session["role"] == "qao"
-    ex = db().execute("SELECT * FROM dimensions WHERE ref=?", (ref,)).fetchone()
+    ex = db().execute("SELECT * FROM dimensions WHERE ref=? AND mno=?", (ref, mno)).fetchone()
     if ex:
         if not qao and ex["uid"] != me:
-            return jsonify(error=f"Ref No. {ref} was already submitted by {ex['insp']}."), 409
+            return jsonify(error=f"Ref No. {ref} Net ID {mno} was already submitted by {ex['insp']}."), 409
         if not qao and ex["exported"]:
-            return jsonify(error=f"Ref No. {ref} was already downloaded by the QA officer. Ask them to correct it."), 409
+            return jsonify(error=f"Ref No. {ref} Net ID {mno} was already downloaded by the QA officer. Ask them to correct it."), 409
         if not d.get("replace"):
             return jsonify(error="exists", exists=True), 409
         db().execute("UPDATE dimensions SET mno=?,insp=?,l1=?,l2=?,w1=?,w2=?,h1=?,h2=?,h3=?,c4=?,"
-                     "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE ref=?",
-                     [mno, insp, *vals, session["email"], now, ref])
+                     "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE id=?",
+                     [mno, insp, *vals, session["email"], now, ex["id"]])
     else:
         db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
                      " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -274,10 +297,14 @@ def save_entry():
     db().commit(); purge()
     return jsonify(ok=True)
 
-@app.delete("/api/entries/<ref>")
+@app.delete("/api/entries/<target>")
 @login_required("qao")
-def delete_entry(ref):
-    db().execute("DELETE FROM dimensions WHERE ref=?", (ref,)); db().commit()
+def delete_entry(target):
+    if str(target).isdigit():
+        db().execute("DELETE FROM dimensions WHERE id=?", (int(target),))
+    else:
+        db().execute("DELETE FROM dimensions WHERE ref=?", (target,))
+    db().commit()
     return jsonify(ok=True)
 
 @app.post("/api/entries/bulk")
@@ -314,17 +341,18 @@ def save_entries_bulk():
             results.append({"ref": ref, "ok": False,
                             "error": f"{label} ({ref}): Fill in all 8 measurements."}); continue
 
-        ex = db().execute("SELECT * FROM dimensions WHERE ref=?", (ref,)).fetchone()
+        # Check if an entry with the same Ref No AND Net ID already exists
+        ex = db().execute("SELECT * FROM dimensions WHERE ref=? AND mno=?", (ref, mno)).fetchone()
         if ex:
             if not qao and ex["uid"] != me:
                 results.append({"ref": ref, "ok": False,
-                                "error": f"{label} ({ref}): Already submitted by {ex['insp']}."}); continue
+                                "error": f"{label} ({ref} Net {mno}): Already submitted by {ex['insp']}."}); continue
             if not qao and ex["exported"]:
                 results.append({"ref": ref, "ok": False,
-                                "error": f"{label} ({ref}): Already downloaded by QAO."}); continue
+                                "error": f"{label} ({ref} Net {mno}): Already downloaded by QAO."}); continue
             db().execute("UPDATE dimensions SET mno=?,insp=?,l1=?,l2=?,w1=?,w2=?,h1=?,h2=?,h3=?,c4=?,"
-                         "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE ref=?",
-                         [mno, insp, *vals, session["email"], now, ref])
+                         "by_email=?,updated_at=?,exported=0,exported_at=NULL WHERE id=?",
+                         [mno, insp, *vals, session["email"], now, ex["id"]])
         else:
             db().execute("INSERT INTO dimensions(ref,mno,insp,l1,l2,w1,w2,h1,h2,h3,c4,uid,by_email,created_at,updated_at)"
                          " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -457,7 +485,7 @@ def export():
     # without entries disappearing from future downloads.
     if data and only_new and not with_ref:
         now = int(time.time())
-        db().executemany("UPDATE dimensions SET exported=1, exported_at=? WHERE ref=?", [(now, r["ref"]) for r in data])
+        db().executemany("UPDATE dimensions SET exported=1, exported_at=? WHERE id=?", [(now, r.get("id")) for r in data])
         db().commit()
 
     date_str = time.strftime('%Y-%m-%d')
